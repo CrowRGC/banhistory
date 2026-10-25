@@ -156,7 +156,9 @@ function rgcReportsFromPayload(payload) {
 
 /* Embedded in the existing React module; no additional dependency is required. */
 function rgcReportElement(type, props, ...children) {
-  return M.jsxs(type, { ...props, children: children.length === 1 ? children[0] : children });
+  const elementProps = { ...props };
+  if (children.length) elementProps.children = children.length === 1 ? children[0] : children;
+  return M.jsxs(type, elementProps);
 }
 
 function rgcReportText(value) {
