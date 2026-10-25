@@ -394,11 +394,11 @@ const ne = (0,T.useCallback)(() => {
   if (rgcRequestRef.current) return rgcRequestRef.current;
   rgcRequestRef.current = Promise.resolve().then(async () => {
     h(true);
-    _('');
     let controller;
     let timeout;
     try {
       if (E) {
+        _('');
         r(Ie);
         a(Fe.map(source => ({...source, records: Ie.filter(record => record.sourceId === source.id).length})));
         y(null);
@@ -406,24 +406,43 @@ const ne = (0,T.useCallback)(() => {
         return;
       }
       controller = new AbortController();
-      timeout = setTimeout(() => controller.abort(), 25000);
-      const response = await fetch(Re, {credentials: 'omit', cache: 'no-store', signal: controller.signal});
-      if (!response.ok) {
-        let detail;
-        try { detail = await response.json(); } catch (_) {}
-        throw Error(typeof detail?.error === 'string' ? detail.error :
-          response.status === 401 || response.status === 403 ?
-            'The public data service rejected the request. Check its configuration.' :
-            'The data service is unavailable. Try refreshing.');
-      }
-      const snapshot = Le(await response.json());
+      const request = (async () => {
+        const response = await fetch(Re, {credentials: 'omit', cache: 'no-store', signal: controller.signal});
+        if (!response.ok) {
+          let detail;
+          try { detail = await response.json(); } catch (_) {}
+          throw Error(typeof detail?.error === 'string' ? detail.error :
+            response.status === 401 || response.status === 403 ?
+              'The public data service rejected the request. Check its configuration.' :
+              'The data service is unavailable. Try refreshing.');
+        }
+        return await response.json();
+      })();
+      const deadline = new Promise((resolve, reject) => {
+        timeout = setTimeout(() => {
+          const error = Error('Records could not be loaded within 25 seconds. Please try again.');
+          error.name = 'TimeoutError';
+          reject(error);
+          try { controller.abort(); } catch (_) {}
+        }, 25000);
+      });
+      // The deadline covers the response body too, even if cancellation is ignored.
+      // No data is committed inside the losing request if it eventually completes.
+      const snapshot = Le(await Promise.race([request, deadline]));
       const reports = rgcReportsFromPayload(snapshot);
+      if ((snapshot.stale !== undefined && typeof snapshot.stale !== 'boolean') ||
+          (snapshot.staleReason !== undefined && typeof snapshot.staleReason !== 'string')) {
+        throw Error('Invalid data freshness details received.');
+      }
       r(snapshot.records);
       a(snapshot.sources);
       y(snapshot.updatedAt);
       rgcSetReports(reports);
+      _(snapshot.stale ? snapshot.staleReason ||
+        'Live refresh is temporarily unavailable. Showing the last available records.' : '');
     } catch (error) {
-      _(error?.name === 'AbortError' ? 'The data service took too long to respond. Last loaded data is still shown.' :
+      _(error?.name === 'AbortError' || error?.name === 'TimeoutError' ?
+        'Records could not be loaded within 25 seconds. Please try again.' :
         error instanceof Error ? error.message : 'Unable to load records.');
       // Preserve the last complete snapshot if a refresh fails.
     } finally {
